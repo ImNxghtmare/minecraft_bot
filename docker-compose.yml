@@ -1,4 +1,4 @@
-# docker-compose.yml в корне проекта
+# docker-compose.yml - с альтернативным образом
 version: '3.8'
 
 services:
@@ -12,41 +12,37 @@ services:
       MYSQL_USER: root
       MYSQL_PASSWORD: Xakin1310228
     ports:
-      - "3307:3306"  # Используем 3307 чтобы не конфликтовать с локальным MySQL
+      - "3307:3306"
     volumes:
       - mysql_data:/var/lib/mysql
-      - ./mysql-init:/docker-entrypoint-initdb.d
     command: --default-authentication-plugin=mysql_native_password
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
-      timeout: 20s
-      retries: 10
 
   redis:
     image: redis:7-alpine
     container_name: minecraft_redis
     restart: always
     ports:
-      - "6380:6379"  # Используем 6380 чтобы не конфликтовать с локальным Redis
+      - "6380:6379"
     volumes:
       - redis_data:/data
-    command: redis-server --appendonly yes
 
   phpmyadmin:
-    image: phpmyadmin/phpmyadmin
+    image: lscr.io/linuxserver/phpmyadmin:latest  # или lscr.io/linuxserver/phpmyadmin:latest
     container_name: minecraft_phpmyadmin
     restart: always
     depends_on:
       - mysql
     environment:
-      PMA_HOST: mysql
-      PMA_PORT: 3306
-      UPLOAD_LIMIT: 256M
+      - DATABASE_HOST=mysql
+      - DATABASE_PORT_NUMBER=3306
+      - DATABASE_USER=root
+      - DATABASE_PASSWORD=Xakin1310228
+      - PHPMYADMIN_ALLOW_ARBITRARY_SERVER=yes
     ports:
-      - "8080:80"
+      - "8080:8080"  # bitnami использует 8080, linuxserver - 80
 
   adminer:
-    image: adminer
+    image: adminer:latest
     container_name: minecraft_adminer
     restart: always
     depends_on:

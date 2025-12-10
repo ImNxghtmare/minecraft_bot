@@ -1,124 +1,196 @@
-from contextlib import asynccontextmanager
-from fastapi import FastAPI, Depends, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-import logging
-import asyncio
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+from typing import Optional, List
+from datetime import datetime
+import sqlite3
+import uvicorn
 
-from app.core.config import settings
-from app.core.database import engine, Base
-from app.core.processor import processor
-from app.core.queue import message_queue
-from app.api.v1.api import api_router
-from app.crud.agent import agent as agent_crud
-from app.core.database import AsyncSessionLocal
-
-# Настройка логирования
-logging.basicConfig(
-    level=logging.INFO if not settings.debug else logging.DEBUG,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
-logger = logging.getLogger(__name__)
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Контекст жизненного цикла приложения"""
-    # Старт
-    logger.info("Starting application...")
-
-    # Создаем таблицы
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
-    # Создаем администратора
-    async with AsyncSessionLocal() as db:
-        await agent_crud.create_initial_admin(db, settings)
-
-    # Запускаем ботов
-    bot_task = asyncio.create_task(processor.start())
-
-    # Запускаем обработку очереди
-    queue_task = asyncio.create_task(message_queue.process_messages(processor))
-
-    yield
-
-    # Остановка
-    logger.info("Shutting down application...")
-
-    # Останавливаем задачи
-    bot_task.cancel()
-    message_queue.stop()
-    queue_task.cancel()
-
-    try:
-        await asyncio.gather(bot_task, queue_task, return_exceptions=True)
-    except asyncio.CancelledError:
-        pass
-
-    await processor.telegram_bot.stop()
-    await processor.vk_bot.stop()
-
-    await engine.dispose()
-    logger.info("Application shutdown complete")
-
-# Создаем приложение
 app = FastAPI(
-    title=settings.app_name,
-    version=settings.app_version,
-    openapi_url="/api/v1/openapi.json",
-    lifespan=lifespan
+    title="Minecraft Support Bot",
+    version="1.0.0",
+    description="API для технической поддержки Minecraft сервера"
 )
 
-# Настройка CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # В продакшене заменить на конкретные домены
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# SQLite база данных для начала
+DB_FILE = "minecraft_bot.db"
 
-# Подключаем статические файлы
-app.mount("/static", StaticFiles(directory="static"), name="static")
+def init_db():
+    """Инициализация базы данных"""
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
 
-# Подключаем API роутеры
-app.include_router(api_router, prefix="/api/v1")
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        platform TEXT NOT NULL,
+        platform_id TEXT NOT NULL,
+        username TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    ''')
 
-# Основной маршрут
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS tickets (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT,
+        status TEXT DEFAULT "open",
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    ''')
+
+    conn.commit()
+    conn.close()
+    print(f"✅ База данных создана: {DB_FILE}")
+
+# Модели
+class UserCreate(BaseModel):
+    platform: str
+    platform_id: str
+    username: Optional[str] = None
+
+class TicketCreate(BaseModel):
+    user_id: int
+    title: str
+    description: Optional[str] = None
+
+# API endpoints
 @app.get("/")
 async def root():
     return {
         "message": "Minecraft Support Bot API",
-        "version": settings.app_version,
-        "docs": "/docs",
-        "openapi": "/api/v1/openapi.json"
+        "status": "running",
+        "database": "SQLite",
+        "timestamp": datetime.now().isoformat()
     }
 
 @app.get("/health")
-async def health_check():
-    return {"status": "healthy"}
-
-# WebSocket для реального времени
-@app.websocket("/ws/tickets")
-async def websocket_tickets(websocket):
-    # TODO: Реализовать WebSocket для обновлений в реальном времени
-    await websocket.accept()
-
+async def health():
     try:
-        while True:
-            # Ожидаем сообщения от клиента
-            data = await websocket.receive_text()
-            await websocket.send_text(f"Message received: {data}")
-    except Exception as e:
-        logger.error(f"WebSocket error: {e}")
-    finally:
-        await websocket.close()
+        conn = sqlite3.connect(DB_FILE)
+        conn.execute("SELECT 1")
+        conn.close()
+        return {"status": "healthy"}
+    except:
+        return {"status": "unhealthy"}
+
+@app.post("/api/users")
+async def create_user(user: UserCreate):
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+
+    cursor.execute(
+        "INSERT INTO users (platform, platform_id, username) VALUES (?, ?, ?)",
+        (user.platform, user.platform_id, user.username)
+    )
+
+    user_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+
+    return {
+        "message": "User created",
+        "user_id": user_id,
+        "platform": user.platform
+    }
+
+@app.get("/api/users")
+async def get_users():
+    conn = sqlite3.connect(DB_FILE)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT * FROM users ORDER BY created_at DESC")
+    users = [dict(row) for row in cursor.fetchall()]
+
+    conn.close()
+    return {
+        "users": users,
+        "count": len(users),
+        "timestamp": datetime.now().isoformat()
+    }
+
+@app.post("/api/tickets")
+async def create_ticket(ticket: TicketCreate):
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+
+    cursor.execute(
+        "INSERT INTO tickets (user_id, title, description) VALUES (?, ?, ?)",
+        (ticket.user_id, ticket.title, ticket.description)
+    )
+
+    ticket_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+
+    return {
+        "message": "Ticket created",
+        "ticket_id": ticket_id,
+        "title": ticket.title,
+        "status": "open"
+    }
+
+@app.get("/api/tickets")
+async def get_tickets():
+    conn = sqlite3.connect(DB_FILE)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT * FROM tickets ORDER BY created_at DESC")
+    tickets = [dict(row) for row in cursor.fetchall()]
+
+    conn.close()
+    return {
+        "tickets": tickets,
+        "count": len(tickets),
+        "timestamp": datetime.now().isoformat()
+    }
+
+@app.get("/api/stats")
+async def get_stats():
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT COUNT(*) FROM users")
+    users = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COUNT(*) FROM tickets")
+    tickets = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COUNT(*) FROM tickets WHERE status = 'open'")
+    open_tickets = cursor.fetchone()[0]
+
+    conn.close()
+
+    return {
+        "users": users,
+        "tickets": tickets,
+        "open_tickets": open_tickets,
+        "database": "SQLite",
+        "timestamp": datetime.now().isoformat()
+    }
 
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(
-        "app.main:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=settings.debug
-    )
+    # Инициализируем базу данных
+    init_db()
+
+    print("=" * 60)
+    print("🤖 MINECRAFT SUPPORT BOT")
+    print("=" * 60)
+    print("\n🚀 Сервер запущен:")
+    print("   📚 Документация: http://localhost:8000/docs")
+    print("   🏠 Главная: http://localhost:8000/")
+    print("\n🔧 Доступные эндпоинты:")
+    print("   POST /api/users    - Создать пользователя")
+    print("   GET  /api/users    - Получить пользователей")
+    print("   POST /api/tickets  - Создать тикет")
+    print("   GET  /api/tickets  - Получить тикеты")
+    print("   GET  /api/stats    - Статистика")
+    print("\n👤 Для будущей аутентификации:")
+    print("   Email: admin@minecraft.local")
+    print("   Пароль: Admin123!")
+    print("\n" + "=" * 60)
+
+    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
