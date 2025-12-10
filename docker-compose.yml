@@ -1,0 +1,59 @@
+# docker-compose.yml в корне проекта
+version: '3.8'
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: minecraft_mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: Xakin1310228
+      MYSQL_DATABASE: minecraft_support
+      MYSQL_USER: root
+      MYSQL_PASSWORD: Xakin1310228
+    ports:
+      - "3307:3306"  # Используем 3307 чтобы не конфликтовать с локальным MySQL
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./mysql-init:/docker-entrypoint-initdb.d
+    command: --default-authentication-plugin=mysql_native_password
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 20s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: minecraft_redis
+    restart: always
+    ports:
+      - "6380:6379"  # Используем 6380 чтобы не конфликтовать с локальным Redis
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin
+    container_name: minecraft_phpmyadmin
+    restart: always
+    depends_on:
+      - mysql
+    environment:
+      PMA_HOST: mysql
+      PMA_PORT: 3306
+      UPLOAD_LIMIT: 256M
+    ports:
+      - "8080:80"
+
+  adminer:
+    image: adminer
+    container_name: minecraft_adminer
+    restart: always
+    depends_on:
+      - mysql
+    ports:
+      - "8081:8080"
+
+volumes:
+  mysql_data:
+  redis_data:
