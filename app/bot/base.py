@@ -1,30 +1,50 @@
-from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional
+import abc
 from app.models.user import PlatformType
-from app.schemas.message import MessageCreate
-from app.schemas.attachment import AttachmentCreate
-from pydantic import BaseModel
 
-class BaseBot(ABC):
+
+class BaseBot(abc.ABC):
+    """
+    Базовый бот: Telegram / VK / Web.
+    Processor вызывает методы этого класса.
+    """
+
     def __init__(self, platform: PlatformType):
         self.platform = platform
 
-    @abstractmethod
+    @abc.abstractmethod
     async def start(self):
+        """Запуск бота (polling / webhook)"""
         pass
 
-    @abstractmethod
+    @abc.abstractmethod
     async def stop(self):
+        """Остановка бота"""
         pass
 
-    @abstractmethod
-    async def send_message(self, user_id: str, text: str, **kwargs) -> Dict[str, Any]:
+    # ===============================
+    # Processor → Bot API
+    # ===============================
+    @abc.abstractmethod
+    async def process_message(self, data: dict):
+        """
+        Получает raw-сообщение платформы и превращает его в MessageCreate.
+        Processor вызывает это.
+        """
         pass
 
-    @abstractmethod
-    async def process_message(self, data: Dict[str, Any]) -> MessageCreate:
+    @abc.abstractmethod
+    async def extract_attachments(self, data: dict):
+        """
+        Получает raw-сообщение платформы и возвращает list[AttachmentCreate]
+        """
         pass
 
-    @abstractmethod
-    async def extract_attachments(self, data: Dict[str, Any]) -> list[AttachmentCreate]:
+    # ===============================
+    # Bot → User API
+    # ===============================
+    @abc.abstractmethod
+    async def send_message(self, user_id: str, text: str, **kwargs):
+        """
+        Отправка сообщения пользователю (Telegram/VK)
+        """
         pass

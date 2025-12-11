@@ -1,28 +1,64 @@
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
-from sqlalchemy.orm import declarative_base
-from .config import settings
+# app/core/database.py
 
-# ВАЖНО: settings.database_url должен быть вида:
-# mysql+aiomysql://user:password@host:3306/dbname
+from sqlalchemy.ext.asyncio import (
+    create_async_engine,
+    async_sessionmaker,
+    AsyncSession,
+)
+from sqlalchemy.orm import DeclarativeBase
+
+from app.core.config import settings
+
+
+# ============================================================
+# Base ORM
+# ============================================================
+
+class Base(DeclarativeBase):
+    pass
+
+
+# ============================================================
+# ENGINE
+# ============================================================
+
+DATABASE_URL = settings.database_url
 
 engine = create_async_engine(
-    settings.database_url,
-    echo=settings.debug,
-    pool_pre_ping=True,
-    pool_recycle=1800,  # безопасный параметр для async MySQL
+    DATABASE_URL,
+    echo=False,              # можешь включить True для дебага SQL
+    future=True
 )
 
-AsyncSessionLocal = async_sessionmaker(
-    bind=engine,
+
+# ============================================================
+# SESSION FACTORY
+# ============================================================
+
+async_session_maker = async_sessionmaker(
+    engine,
     expire_on_commit=False,
-    class_=AsyncSession
+    class_=AsyncSession,
 )
 
-Base = declarative_base()
 
-async def get_db() -> AsyncSession:
-    async with AsyncSessionLocal() as session:
-        try:
-            yield session
-        finally:
-            await session.close()
+# ============================================================
+# DEPENDENCY
+# ============================================================
+
+async def get_session() -> AsyncSession:
+    async with async_session_maker() as session:
+        yield session
+
+
+# ============================================================
+# DATABASE INIT (CREATE TABLES)
+# ============================================================
+
+async def init_models():
+    """
+    Создаёт таблицы, если их нет. Вызывается при старте FastAPI.
+    """
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+

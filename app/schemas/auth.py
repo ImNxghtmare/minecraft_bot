@@ -1,35 +1,36 @@
 from pydantic import BaseModel, EmailStr
-from datetime import datetime
 from typing import Optional
+from app.models.agent import AgentRole
+
+
+# --------------------------
+# TOKEN SCHEMAS
+# --------------------------
 
 class Token(BaseModel):
     access_token: str
-    token_type: str
-    expires_in: int
+    token_type: str = "bearer"
+
 
 class TokenPayload(BaseModel):
-    sub: int
-    email: str
-    role: str
-    exp: datetime
+    sub: Optional[int] = None
 
-class LoginRequest(BaseModel):
+
+# --------------------------
+# LOGIN
+# --------------------------
+
+class AgentLogin(BaseModel):
     email: EmailStr
     password: str
+
+
+# --------------------------
+# CREATE AGENT (used in CRUD)
+# --------------------------
 
 class AgentCreate(BaseModel):
     email: EmailStr
     password: str
     full_name: str
-    role: str = "support"
-
-class AgentResponse(BaseModel):
-    id: int
-    email: str
-    full_name: str
-    role: str
-    is_active: bool
-    last_login: Optional[datetime] = None
-
-    class Config:
-        from_attributes = True
+    role: Optional[AgentRole] = AgentRole.SUPPORT

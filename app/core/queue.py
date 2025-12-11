@@ -2,51 +2,42 @@ import asyncio
 import logging
 from typing import Tuple, Optional
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("queue")
 
 class MessageQueue:
     def __init__(self):
         self.queue = asyncio.Queue()
-        self.processing = False
+        self._running = False
 
     async def put(self, item: Tuple[str, dict]):
-        """Добавление сообщения в очередь"""
+        """Добавить сообщение в очередь"""
         await self.queue.put(item)
-        logger.debug(f"Message added to queue: {item[0]}")
+        logger.debug(f"Queued message: {item}")
 
     async def get(self) -> Optional[Tuple[str, dict]]:
-        """Получение сообщения из очереди"""
         try:
             return await self.queue.get()
         except asyncio.CancelledError:
             return None
 
     async def process_messages(self, processor):
-        """Фоновая обработка сообщений из очереди"""
-        self.processing = True
+        self._running = True
+        while self._running:
+            item = await self.get()
+            if item is None:
+                continue
 
-        while self.processing:
+            platform, data = item
+
             try:
-                item = await self.get()
-                if item is None:
-                    continue
-
-                platform, data = item
-
-                try:
-                    await processor.process_incoming_message(platform, data)
-                except Exception as e:
-                    logger.error(f"Error processing queued message: {e}")
-
-                self.queue.task_done()
-
+                await processor.process(platform, data)
             except Exception as e:
-                logger.error(f"Queue processing error: {e}")
-                await asyncio.sleep(1)
+                logger.error(f"Error processing queued message: {e}", exc_info=True)
+
+            self.queue.task_done()
 
     def stop(self):
-        """Остановка обработки очереди"""
-        self.processing = False
+        self._running = False
 
-# Глобальная очередь
+
 message_queue = MessageQueue()

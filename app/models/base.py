@@ -1,16 +1,21 @@
-from sqlalchemy import Column, Integer, DateTime
-from sqlalchemy.ext.declarative import declared_attr
-from sqlalchemy.sql import func
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy import DateTime, func
 from datetime import datetime
-from app.core.database import Base
 
-class BaseModel(Base):
-    __abstract__ = True
 
-    id = Column(Integer, primary_key=True, index=True)
-    created_at = Column(DateTime, default=func.now(), nullable=False)
-    updated_at = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
+class Base(DeclarativeBase):
+    pass
 
-    @declared_attr
-    def __tablename__(cls) -> str:
-        return cls.__name__.lower()
+
+class TimestampMixin:
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=False),
+        server_default=func.now(),
+        nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=False),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False
+    )

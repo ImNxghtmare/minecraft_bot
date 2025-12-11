@@ -1,18 +1,44 @@
 from pydantic import BaseModel
+from typing import Optional, List
 from datetime import datetime
-from typing import Optional
-from app.models.ticket import TicketStatus, TicketPriority, TicketCategory
-from app.models.user import PlatformType
+from enum import Enum
+
+from app.schemas.message import MessageDB
+
+
+class TicketStatus(str, Enum):
+    OPEN = "OPEN"
+    IN_PROGRESS = "IN_PROGRESS"
+    PENDING = "PENDING"
+    CLOSED = "CLOSED"
+
+
+class TicketPriority(str, Enum):
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+    CRITICAL = "CRITICAL"
+
+
+class TicketCategory(str, Enum):
+    TECHNICAL = "TECHNICAL"
+    GAMEPLAY = "GAMEPLAY"
+    PAYMENT = "PAYMENT"
+    COMPLAINT = "COMPLAINT"
+    OTHER = "OTHER"
+
 
 class TicketBase(BaseModel):
-    user_id: int
-    platform: PlatformType
     title: str
     description: Optional[str] = None
-    category: TicketCategory = TicketCategory.OTHER
+
 
 class TicketCreate(TicketBase):
-    pass
+    user_id: int
+    platform: str  # TELEGRAM / VK / WEB
+    priority: Optional[TicketPriority] = None
+    category: Optional[TicketCategory] = None
+
 
 class TicketUpdate(BaseModel):
     status: Optional[TicketStatus] = None
@@ -21,16 +47,23 @@ class TicketUpdate(BaseModel):
     assigned_to: Optional[int] = None
     is_escalated: Optional[bool] = None
 
-class TicketInDB(TicketBase):
+
+class TicketDB(TicketBase):
     id: int
+    user_id: int
+    platform: str
     status: TicketStatus
-    priority: TicketPriority
-    assigned_to: Optional[int] = None
+    priority: Optional[TicketPriority]
+    category: Optional[TicketCategory]
+    assigned_to: Optional[int]
+    first_response_at: Optional[datetime]
+    closed_at: Optional[datetime]
+    is_escalated: bool
+
     created_at: datetime
     updated_at: datetime
-    first_response_at: Optional[datetime] = None
-    closed_at: Optional[datetime] = None
-    is_escalated: bool = False
+
+    messages: List[MessageDB] = []
 
     class Config:
         from_attributes = True

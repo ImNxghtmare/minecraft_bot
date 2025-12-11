@@ -1,60 +1,64 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from typing import Optional
-from app.crud.base import CRUDBase
-from app.models.agent import Agent
-from app.schemas.auth import AgentCreate
-from app.models.agent import AgentRole
+from passlib.context import CryptContext
 
-class CRUDAgent(CRUDBase[Agent, AgentCreate, AgentCreate]):
-    async def get_by_email(self, db: AsyncSession, *, email: str) -> Optional[Agent]:
-        result = await db.execute(select(Agent).where(Agent.email == email))
-        return result.scalar_one_or_none()
+from app.models.agent import Agent, AgentRole
+from app.schemas.auth import AgentCreate, AgentLogin
+from app.core.config import settings
 
-    async def authenticate(self, db: AsyncSession, *, email: str, password: str) -> Optional[Agent]:
-        agent = await self.get_by_email(db, email=email)
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+
+class AgentCRUD:
+
+    async def get_by_id(self, db: AsyncSession, agent_id: int) -> Agent | None:
+        res = await db.execute(select(Agent).where(Agent.id == agent_id))
+        return res.scalars().first()
+
+    async def get_by_email(self, db: AsyncSession, email: str) -> Agent | None:
+        res = await db.execute(select(Agent).where(Agent.email == email))
+        return res.scalars().first()
+
+    async def create(self, db: AsyncSession, agent_in: AgentCreate) -> Agent:
+        hashed_pw = pwd_context.hash(agent_in.password)
+
+        obj = Agent(
+            email=agent_in.email,
+            password_hash=hashed_pw,
+            full_name=agent_in.full_name,
+            role=agent_in.role,
+            is_active=True,
+        )
+
+        db.add(obj)
+        await db.commit()
+        await db.refresh(obj)
+        return obj
+
+    async def authenticate(self, db: AsyncSession, data: AgentLogin) -> Agent | None:
+        agent = await self.get_by_email(db, data.email)
         if not agent:
             return None
-        if not agent.verify_password(password):
+        if not pwd_context.verify(data.password, agent.password_hash):
             return None
         return agent
 
-    async def update_last_login(self, db: AsyncSession, *, agent_id: int) -> Optional[Agent]:
-        from datetime import datetime
-        agent = await self.get(db, agent_id)
-        if agent:
-            agent.last_login = datetime.now()
-            db.add(agent)
-            await db.commit()
-            await db.refresh(agent)
-        return agent
+    async def create_initial_admin(self, db: AsyncSession, settings):
+        if not settings.first_admin_email:
+            return
 
-    async def create_initial_admin(self, db: AsyncSession, settings) -> Optional[Agent]:
-        # Проверяем, есть ли администратор
-        admin = await self.get_by_email(db, email=settings.first_admin_email)
-        if admin:
-            return admin
+        exists = await self.get_by_email(db, settings.first_admin_email)
+        if exists:
+            return
 
-        # Создаём объект pydantic
-        admin_in = AgentCreate(
+        admin_data = AgentCreate(
             email=settings.first_admin_email,
             password=settings.first_admin_password,
             full_name=settings.first_admin_name,
-            role=AgentRole.ADMIN,  # <-- важное исправление
+            role=AgentRole.ADMIN,
         )
 
-        # Преобразуем в dict (Pydantic v2)
-        admin_data = admin_in.model_dump()
+        await self.create(db, admin_data)
 
-        # Обрабатываем пароль
-        plain_password = admin_data.pop("password")
-        admin_data["password_hash"] = Agent.hash_password(plain_password)
 
-        # Создаём запись в БД
-        admin = Agent(**admin_data)
-        db.add(admin)
-        await db.commit()
-        await db.refresh(admin)
-        return admin
-
-agent = CRUDAgent(Agent)
+agent_crud = AgentCRUD()

@@ -1,9 +1,21 @@
 from pydantic import BaseModel
-from datetime import datetime
 from typing import Optional
-from app.models.message import AttachmentType
+from enum import Enum
+from datetime import datetime
 
-class AttachmentBase(BaseModel):
+
+class AttachmentType(str, Enum):
+    PHOTO = "PHOTO"
+    VIDEO = "VIDEO"
+    AUDIO = "AUDIO"
+    DOCUMENT = "DOCUMENT"
+    STICKER = "STICKER"
+    VOICE = "VOICE"
+    LOCATION = "LOCATION"
+    CONTACT = "CONTACT"
+
+
+class AttachmentCreate(BaseModel):
     message_id: int
     attachment_type: AttachmentType
     file_id: str
@@ -12,10 +24,8 @@ class AttachmentBase(BaseModel):
     mime_type: Optional[str] = None
     caption: Optional[str] = None
 
-class AttachmentCreate(AttachmentBase):
-    pass
 
-class AttachmentInDB(AttachmentBase):
+class AttachmentDB(AttachmentCreate):
     id: int
     created_at: datetime
     updated_at: datetime

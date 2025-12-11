@@ -1,36 +1,30 @@
-from sqlalchemy import Column, String, Enum, Boolean, DateTime
-from sqlalchemy.orm import relationship
-from app.models.base import BaseModel
-import enum
-from passlib.context import CryptContext
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy import String, Enum, Integer, Boolean, DateTime
+from enum import Enum as PyEnum
+from datetime import datetime
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+from app.models.base import Base, TimestampMixin
 
-class AgentRole(enum.Enum):
-    ADMIN = "admin"
-    SUPPORT = "support"
-    MODERATOR = "moderator"
 
-class Agent(BaseModel):
+class AgentRole(PyEnum):
+    ADMIN = "ADMIN"
+    SUPPORT = "SUPPORT"
+    MODERATOR = "MODERATOR"
+
+
+class Agent(Base, TimestampMixin):
     __tablename__ = "agents"
 
-    email = Column(String(255), unique=True, nullable=False, index=True)
-    password_hash = Column(String(255), nullable=False)
-    full_name = Column(String(150), nullable=False)
-    role = Column(Enum(AgentRole), default=AgentRole.SUPPORT)
-    is_active = Column(Boolean, default=True)
-    last_login = Column(DateTime, nullable=True)
-    telegram_id = Column(String(100), nullable=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
 
-    # Relationships
-    assigned_tickets = relationship("Ticket", back_populates="agent")
+    email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    full_name: Mapped[str] = mapped_column(String(150), nullable=False)
 
-    def verify_password(self, password: str) -> bool:
-        return pwd_context.verify(password, self.password_hash)
+    role: Mapped[AgentRole] = mapped_column(Enum(AgentRole))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
-    @staticmethod
-    def hash_password(password: str) -> str:
-        return pwd_context.hash(password)
+    last_login: Mapped[datetime | None] = mapped_column(DateTime)
+    telegram_id: Mapped[str | None] = mapped_column(String(100))
 
-    def __repr__(self):
-        return f"<Agent {self.email}: {self.role}>"
+    tickets = relationship("Ticket", backref="agent")
