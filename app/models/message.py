@@ -1,19 +1,23 @@
-from sqlalchemy import Column, String, Enum, Integer, ForeignKey, DateTime, Boolean, Text, Float
-from sqlalchemy.orm import relationship
-from app.models.base import BaseModel
-import enum
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy import Enum, Integer, Text, String, Float, ForeignKey, Boolean
+from enum import Enum as PyEnum
 
-class MessageDirection(enum.Enum):
-    INCOMING = "incoming"
-    OUTGOING = "outgoing"
+from app.models.base import Base, TimestampMixin
 
-class MessageStatus(enum.Enum):
-    SENT = "sent"
-    DELIVERED = "delivered"
-    READ = "read"
-    ERROR = "error"
 
-class AttachmentType(enum.Enum):
+class MessageDirection(PyEnum):
+    INCOMING = "INCOMING"
+    OUTGOING = "OUTGOING"
+
+
+class MessageStatus(PyEnum):
+    SENT = "SENT"
+    DELIVERED = "DELIVERED"
+    READ = "READ"
+    ERROR = "ERROR"
+
+
+class AttachmentType(PyEnum):
     PHOTO = "PHOTO"
     VIDEO = "VIDEO"
     AUDIO = "AUDIO"
@@ -23,37 +27,32 @@ class AttachmentType(enum.Enum):
     LOCATION = "LOCATION"
     CONTACT = "CONTACT"
 
-class Message(BaseModel):
+
+class Message(Base, TimestampMixin):
     __tablename__ = "messages"
 
-    ticket_id = Column(Integer, ForeignKey("tickets.id", ondelete="CASCADE"), nullable=True)
-    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    direction = Column(Enum(MessageDirection), nullable=False)
-    status = Column(Enum(MessageStatus), default=MessageStatus.SENT)
-    content = Column(Text, nullable=True)
-    is_ai_response = Column(Boolean, default=False)
-    confidence_score = Column(Float, nullable=True)
-    platform_message_id = Column(String(100), nullable=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
 
-    user = relationship("User", back_populates="messages")
+    ticket_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("tickets.id", ondelete="CASCADE")
+    )
+
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE")
+    )
+
+    direction: Mapped[MessageDirection] = mapped_column(Enum(MessageDirection))
+    status: Mapped[MessageStatus | None] = mapped_column(Enum(MessageStatus))
+
+    content: Mapped[str | None] = mapped_column(Text)
+
+    is_ai_response: Mapped[bool] = mapped_column(Boolean, default=False)
+    confidence_score: Mapped[float | None] = mapped_column(Float)
+
+    platform_message_id: Mapped[str | None] = mapped_column(String(100))
+
+    # relations
     ticket = relationship("Ticket", back_populates="messages")
-    attachments = relationship("Attachment", back_populates="message", cascade="all, delete-orphan")
+    user = relationship("User", back_populates="messages")
+    attachments = relationship("Attachment", back_populates="message")
 
-    def __repr__(self):
-        return f"<Message {self.direction}: {self.content[:50] if self.content else 'No content'}>"
-
-class Attachment(BaseModel):
-    __tablename__ = "attachments"
-
-    message_id = Column(Integer, ForeignKey("messages.id", ondelete="CASCADE"), nullable=False)
-    attachment_type = Column(Enum(AttachmentType), nullable=False)
-    file_id = Column(String(500), nullable=False)
-    file_url = Column(String(500), nullable=True)
-    file_size = Column(Integer, nullable=True)
-    mime_type = Column(String(100), nullable=True)
-    caption = Column(Text, nullable=True)
-
-    message = relationship("Message", back_populates="attachments")
-
-    def __repr__(self):
-        return f"<Attachment {self.attachment_type}: {self.file_id}>"

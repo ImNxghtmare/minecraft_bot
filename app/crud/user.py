@@ -1,49 +1,61 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from typing import Optional
-from app.crud.base import CRUDBase
-from app.models.user import User
-from app.schemas.user import UserCreate, UserUpdate
-from app.models.user import PlatformType
 
-class CRUDUser(CRUDBase[User, UserCreate, UserUpdate]):
-    async def get_by_platform_id(
-            self, db: AsyncSession, *, platform: PlatformType, platform_id: str
-    ) -> Optional[User]:
-        result = await db.execute(
+from app.models.user import User, PlatformType
+from app.schemas.user import UserCreate, UserUpdate
+
+
+class UserCRUD:
+
+    async def get_by_platform(
+            self,
+            db: AsyncSession,
+            platform: PlatformType,
+            platform_id: str
+    ) -> User | None:
+        res = await db.execute(
             select(User).where(
                 User.platform == platform,
                 User.platform_id == platform_id
             )
         )
-        return result.scalar_one_or_none()
+        return res.scalars().first()
 
-    async def get_or_create(
-            self, db: AsyncSession, *, platform: PlatformType, platform_id: str,
-            username: str = None, first_name: str = None, last_name: str = None
+    async def create(
+            self,
+            db: AsyncSession,
+            user_in: UserCreate
     ) -> User:
-        user = await self.get_by_platform_id(db, platform=platform, platform_id=platform_id)
 
-        if not user:
-            user_in = UserCreate(
-                platform=platform,
-                platform_id=platform_id,
-                username=username,
-                first_name=first_name,
-                last_name=last_name
-            )
-            user = await self.create(db, obj_in=user_in)
+        obj = User(
+            platform=user_in.platform,
+            platform_id=user_in.platform_id,
+            username=user_in.username,
+            first_name=user_in.first_name,
+            last_name=user_in.last_name,
+            language_code=user_in.language_code,
+            is_banned=False,
+            is_blocked=False
+        )
 
-        return user
+        db.add(obj)
+        await db.commit()
+        await db.refresh(obj)
+        return obj
 
-    async def update_last_active(self, db: AsyncSession, *, user_id: int) -> Optional[User]:
-        from datetime import datetime
-        user = await self.get(db, user_id)
-        if user:
-            user.last_active = datetime.now()
-            db.add(user)
-            await db.commit()
-            await db.refresh(user)
-        return user
+    async def update(
+            self,
+            db: AsyncSession,
+            db_obj: User,
+            data: UserUpdate
+    ) -> User:
 
-user_crud = CRUDUser(User)
+        for field, value in data.dict(exclude_unset=True).items():
+            setattr(db_obj, field, value)
+
+        await db.commit()
+        await db.refresh(db_obj)
+        return db_obj
+
+
+user_crud = UserCRUD()

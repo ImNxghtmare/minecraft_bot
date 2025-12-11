@@ -1,29 +1,40 @@
-from sqlalchemy import Column, String, Enum, Boolean, DateTime
-from sqlalchemy.orm import relationship
-from app.models.base import BaseModel
-import enum
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy import String, Boolean, Enum, Integer, DateTime
+from datetime import datetime
+from enum import Enum as PyEnum
 
-class PlatformType(enum.Enum):
-    TELEGRAM = "telegram"
-    VK = "vk"
-    WEB = "web"
+from app.models.base import Base, TimestampMixin
 
-class User(BaseModel):
+
+class PlatformType(PyEnum):
+    TELEGRAM = "TELEGRAM"
+    VK = "VK"
+    WEB = "WEB"
+
+
+class User(Base, TimestampMixin):
     __tablename__ = "users"
 
-    platform = Column(Enum(PlatformType), nullable=False, index=True)
-    platform_id = Column(String(255), nullable=False, index=True)
-    username = Column(String(100), nullable=True)
-    first_name = Column(String(100), nullable=True)
-    last_name = Column(String(100), nullable=True)
-    language_code = Column(String(10), default="ru")
-    is_banned = Column(Boolean, default=False)
-    is_blocked = Column(Boolean, default=False)
-    last_active = Column(DateTime, nullable=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
 
-    # Relationships
-    tickets = relationship("Ticket", back_populates="user", cascade="all, delete-orphan")
-    messages = relationship("Message", back_populates="user", cascade="all, delete-orphan")
+    platform: Mapped[PlatformType] = mapped_column(
+        Enum(PlatformType), nullable=False
+    )
 
-    def __repr__(self):
-        return f"<User {self.platform}:{self.platform_id}>"
+    platform_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+
+    username: Mapped[str | None] = mapped_column(String(100))
+    first_name: Mapped[str | None] = mapped_column(String(100))
+    last_name: Mapped[str | None] = mapped_column(String(100))
+
+    language_code: Mapped[str | None] = mapped_column(String(10))
+
+    is_banned: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_blocked: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    last_active: Mapped[datetime | None] = mapped_column(DateTime)
+
+    # relations
+    tickets = relationship("Ticket", back_populates="user")
+    messages = relationship("Message", back_populates="user")
+

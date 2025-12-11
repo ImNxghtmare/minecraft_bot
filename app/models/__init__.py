@@ -1,0 +1,2 @@
+def attachment():
+    return None

@@ -1,30 +1,49 @@
 from pydantic import BaseModel
-from datetime import datetime
 from typing import Optional, List
-from app.models.message import MessageDirection, MessageStatus
-from .attachment import AttachmentInDB
+from datetime import datetime
+from enum import Enum
+from app.schemas.attachment import AttachmentDB
+
+
+class MessageDirection(str, Enum):
+    INCOMING = "INCOMING"
+    OUTGOING = "OUTGOING"
+
+
+class MessageStatus(str, Enum):
+    SENT = "SENT"
+    DELIVERED = "DELIVERED"
+    READ = "READ"
+    ERROR = "ERROR"
+
 
 class MessageBase(BaseModel):
     ticket_id: Optional[int] = None
+    content: Optional[str] = None
+    platform_message_id: Optional[str] = None
+
+
+class MessageCreate(MessageBase):
     user_id: int
     direction: MessageDirection
-    content: Optional[str] = None
     is_ai_response: bool = False
     confidence_score: Optional[float] = None
 
-class MessageCreate(MessageBase):
-    platform_message_id: Optional[str] = None
 
 class MessageUpdate(BaseModel):
     status: Optional[MessageStatus] = None
 
-class MessageInDB(MessageBase):
+
+class MessageDB(MessageBase):
     id: int
-    status: MessageStatus
-    platform_message_id: Optional[str] = None
+    user_id: int
+    direction: MessageDirection
+    status: Optional[MessageStatus]
+    is_ai_response: bool
+    confidence_score: Optional[float]
     created_at: datetime
     updated_at: datetime
-    attachments: List[AttachmentInDB] = []
+    attachments: List[AttachmentDB] = []
 
     class Config:
         from_attributes = True

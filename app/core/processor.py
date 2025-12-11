@@ -1,74 +1,114 @@
-# app/core/processor.py
-
+import asyncio
 import logging
-from datetime import datetime
 
-from sqlalchemy.ext.asyncio import AsyncSession
+from app.core.queue import message_queue
+from app.core.database import async_session_maker
 
-from app.core.database import AsyncSessionLocal
+from app.models.user import PlatformType
+
 from app.crud.user import user_crud
-from app.crud.ticket import ticket as ticket_crud
-from app.crud.message import message as msg_crud
-from app.schemas.ticket import TicketCreate
-from app.schemas.message import MessageCreate, MessageDirection
-from app.bot.telegram_bot import TelegramBot
+from app.crud.ticket import ticket_crud
+from app.crud.message import msg_crud
+from app.crud.attachment import attachment_crud
 
-logger = logging.getLogger(__name__)
+from app.bot.telegram_bot import TelegramBot
+# from app.bot.vk_bot import VkBot  # если понадобится
+
+logger = logging.getLogger("processor")
 
 
 class Processor:
     def __init__(self):
-        self.telegram_bot = TelegramBot()
-        self.vk_bot = None  # позже добавим
+        self.bots = {
+            PlatformType.TELEGRAM: TelegramBot(),
+            # PlatformType.VK: VkBot(),
+        }
 
     async def start(self):
-        await self.telegram_bot.start()
+        # запускаем polling у ботов
+        for bot in self.bots.values():
+            asyncio.create_task(bot.start())
+
+        # запускаем очередь
+        asyncio.create_task(message_queue.process_messages(self))
         logger.info("Processor started")
 
-    async def process_incoming_message(self, platform: str, data: dict):
-        logger.info(f"PROCESSOR: received from {platform}: {data}")
+    async def process(self, platform: str, raw: dict):
+        platform_type = PlatformType(platform)
 
-        async with AsyncSessionLocal() as db:
-            # 1. User ensure
-            user = await user_crud.get_or_create_from_platform(
-                db,
-                platform=platform,
-                platform_user_id=str(data["from"]["id"]),
-                username=data["from"].get("username")
+        bot = self.bots.get(platform_type)
+        if not bot:
+            logger.error(f"No bot for platform: {platform}")
+            return
+
+        async with async_session_maker() as db:
+
+            # 1) создать или найти пользователя
+            user_data = raw.get("from_user") or raw.get("from") or {}
+            platform_id = str(user_data.get("id"))
+
+            user = await user_crud.get_by_platform(
+                db, platform_type, platform_id
             )
 
-            # 2. Ticket ensure
-            ticket = await ticket_crud.get_open_ticket_for_user(db, user.id)
+            if not user:
+                user = await user_crud.create(
+                    db,
+                    user_in={
+                        "platform": platform_type,
+                        "platform_id": platform_id,
+                        "username": user_data.get("username"),
+                        "first_name": user_data.get("first_name"),
+                        "last_name": user_data.get("last_name"),
+                        "language_code": user_data.get("language_code"),
+                    }
+                )
+
+            # 2) найти или создать открытый тикет
+            ticket = await ticket_crud.get_open_by_user(db, user.id)
+
             if not ticket:
                 ticket = await ticket_crud.create(
                     db,
-                    TicketCreate(
-                        user_id=user.id,
-                        platform=platform,
-                        title="Вопрос пользователя",
-                        description=data.get("text")
-                    )
+                    data={
+                        "user_id": user.id,
+                        "platform": platform_type,
+                        "title": "Support Ticket",
+                        "description": raw.get("text") or "",
+                        "priority": None,
+                        "category": None,
+                        "status": None,
+                        "assigned_to": None,
+                        "is_escalated": False,
+                    }
                 )
 
-            # 3. Save message
-            message = await msg_crud.create(
+            # 3) сохранить сообщение
+            msg_obj = await msg_crud.create(
                 db,
-                MessageCreate(
-                    user_id=user.id,
-                    ticket_id=ticket.id,
-                    content=data.get("text"),
-                    direction=MessageDirection.INCOMING,
-                ),
+                message_in={
+                    "user_id": user.id,
+                    "ticket_id": ticket.id,
+                    "direction": "INCOMING",
+                    "content": raw.get("text") or raw.get("caption"),
+                    "platform_message_id": str(raw.get("message_id")),
+                    "is_ai_response": False,
+                    "confidence_score": None,
+                    "status": None,
+                }
             )
 
-            # 4. Basic AI or operator routing
-            reply = "Спасибо! Мы получили ваше сообщение. Оператор подключится в ближайшее время."
-
-            if platform == "telegram":
-                await self.telegram_bot.send_message(
-                    user.platform_user_id,
-                    reply
+            # 4) вложения
+            attachments = await bot.extract_attachments(raw)
+            if attachments:
+                await attachment_crud.create(
+                    db,
+                    message_id=msg_obj.id,
+                    attachment_in=attachments
                 )
 
+            await db.commit()
 
-processor = Processor()
+            # 5) (опционально) ответить
+            # await bot.send_message(user.platform_id, "Сообщение принято")
+
