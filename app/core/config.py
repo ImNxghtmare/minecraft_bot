@@ -1,44 +1,74 @@
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Optional
 
+
 class Settings(BaseSettings):
+    # -------------------------
     # Database
+    # -------------------------
     database_url: str
-    mysql_host: str = "localhost"
-    mysql_port: int = 3306
+    mysql_host: str
+    mysql_port: int
     mysql_user: str
     mysql_password: str
     mysql_database: str
 
+    # -------------------------
     # Redis
-    redis_url: str = "redis://localhost:6379"
+    # -------------------------
+    redis_url: str
+    redis_port_external: Optional[int] = None
 
-    # Telegram
+    # -------------------------
+    # Telegram Bot
+    # -------------------------
     telegram_bot_token: Optional[str] = None
     telegram_webhook_secret: Optional[str] = None
+    telegram_webhook_url: Optional[str] = None  # <-- ДОБАВИЛ
 
-    # VK
+    # -------------------------
+    # VK Bot
+    # -------------------------
     vk_bot_token: Optional[str] = None
     vk_group_id: Optional[int] = None
     vk_secret_key: Optional[str] = None
     vk_confirmation_code: Optional[str] = None
 
-    # JWT
+    # -------------------------
+    # JWT Auth
+    # -------------------------
     jwt_secret_key: str
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 30
 
-    # Admin
-    first_admin_email: str = "admin@example.com"
-    first_admin_password: str = "admin123"
-    first_admin_name: str = "Administrator"
+    # -------------------------
+    # Initial Admin Creation
+    # -------------------------
+    first_admin_email: str
+    first_admin_password: str
+    first_admin_name: str
 
-    # App
-    app_name: str = "Minecraft Support Bot"
-    app_version: str = "1.0.0"
+    # -------------------------
+    # App Settings
+    # -------------------------
+    app_name: str
+    app_version: str
     debug: bool = False
 
-    class Config:
-        env_file = ".env"
+    # -------------------------
+    # Logging
+    # -------------------------
+    log_level: str
+    log_file: str
+
+    # -------------------------
+    # Pydantic Settings
+    # -------------------------
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="forbid"
+    )
+
 
 settings = Settings()

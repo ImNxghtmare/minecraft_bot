@@ -1,15 +1,27 @@
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, or_
+from datetime import datetime
 from typing import List, Optional
-from datetime import datetime, timedelta
+
+from sqlalchemy import select, func
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.crud.base import CRUDBase
-from app.models.ticket import Ticket
+from app.models.ticket import (
+    Ticket,
+    TicketStatus,
+    TicketPriority,
+    TicketCategory,  # если у тебя другое имя — поправь импорт
+)
 from app.schemas.ticket import TicketCreate, TicketUpdate
-from app.models.ticket import TicketStatus, TicketPriority
+
 
 class CRUDTicket(CRUDBase[Ticket, TicketCreate, TicketUpdate]):
     async def get_by_user(
-            self, db: AsyncSession, *, user_id: int, skip: int = 0, limit: int = 100
+            self,
+            db: AsyncSession,
+            *,
+            user_id: int,
+            skip: int = 0,
+            limit: int = 100,
     ) -> List[Ticket]:
         result = await db.execute(
             select(Ticket)
@@ -21,7 +33,11 @@ class CRUDTicket(CRUDBase[Ticket, TicketCreate, TicketUpdate]):
         return result.scalars().all()
 
     async def get_open_tickets(
-            self, db: AsyncSession, *, skip: int = 0, limit: int = 100
+            self,
+            db: AsyncSession,
+            *,
+            skip: int = 0,
+            limit: int = 100,
     ) -> List[Ticket]:
         result = await db.execute(
             select(Ticket)
@@ -33,7 +49,12 @@ class CRUDTicket(CRUDBase[Ticket, TicketCreate, TicketUpdate]):
         return result.scalars().all()
 
     async def get_by_agent(
-            self, db: AsyncSession, *, agent_id: int, skip: int = 0, limit: int = 100
+            self,
+            db: AsyncSession,
+            *,
+            agent_id: int,
+            skip: int = 0,
+            limit: int = 100,
     ) -> List[Ticket]:
         result = await db.execute(
             select(Ticket)
@@ -44,8 +65,68 @@ class CRUDTicket(CRUDBase[Ticket, TicketCreate, TicketUpdate]):
         )
         return result.scalars().all()
 
+    # --------- НОВЫЕ УТИЛИТЫ ДЛЯ ПРОЦЕССОРА ---------
+
+    async def get_last_active_for_user(
+            self,
+            db: AsyncSession,
+            *,
+            user_id: int,
+    ) -> Optional[Ticket]:
+        """
+        Вернуть последний активный (не закрытый) тикет пользователя, если есть.
+        Активные статусы: OPEN, IN_PROGRESS, PENDING.
+        """
+        result = await db.execute(
+            select(Ticket)
+            .where(
+                Ticket.user_id == user_id,
+                Ticket.status.in_(
+                    [TicketStatus.OPEN, TicketStatus.IN_PROGRESS, TicketStatus.PENDING]
+                ),
+                )
+            .order_by(Ticket.created_at.desc())
+            .limit(1)
+        )
+        return result.scalars().first()
+
+    async def get_or_create_active_for_user(
+            self,
+            db: AsyncSession,
+            *,
+            user_id: int,
+            platform,
+            title: str = "Обращение в поддержку",
+            description: Optional[str] = None,
+            priority: TicketPriority = TicketPriority.MEDIUM,
+            category: TicketCategory = TicketCategory.OTHER,
+    ) -> Ticket:
+        """
+        Найти последний активный тикет пользователя.
+        Если нет — создать новый.
+        """
+        ticket = await self.get_last_active_for_user(db, user_id=user_id)
+        if ticket:
+            return ticket
+
+        ticket_in = TicketCreate(
+            user_id=user_id,
+            platform=platform,
+            status=TicketStatus.OPEN,
+            priority=priority,
+            category=category,
+            title=title,
+            description=description,
+        )
+        ticket = await self.create(db, obj_in=ticket_in)
+        return ticket
+
     async def assign_ticket(
-            self, db: AsyncSession, *, ticket_id: int, agent_id: int
+            self,
+            db: AsyncSession,
+            *,
+            ticket_id: int,
+            agent_id: int,
     ) -> Optional[Ticket]:
         ticket = await self.get(db, ticket_id)
         if ticket:
@@ -56,7 +137,12 @@ class CRUDTicket(CRUDBase[Ticket, TicketCreate, TicketUpdate]):
             await db.refresh(ticket)
         return ticket
 
-    async def close_ticket(self, db: AsyncSession, *, ticket_id: int) -> Optional[Ticket]:
+    async def close_ticket(
+            self,
+            db: AsyncSession,
+            *,
+            ticket_id: int,
+    ) -> Optional[Ticket]:
         ticket = await self.get(db, ticket_id)
         if ticket:
             ticket.status = TicketStatus.CLOSED
@@ -66,7 +152,12 @@ class CRUDTicket(CRUDBase[Ticket, TicketCreate, TicketUpdate]):
             await db.refresh(ticket)
         return ticket
 
-    async def escalate_ticket(self, db: AsyncSession, *, ticket_id: int) -> Optional[Ticket]:
+    async def escalate_ticket(
+            self,
+            db: AsyncSession,
+            *,
+            ticket_id: int,
+    ) -> Optional[Ticket]:
         ticket = await self.get(db, ticket_id)
         if ticket:
             ticket.is_escalated = True
@@ -77,27 +168,30 @@ class CRUDTicket(CRUDBase[Ticket, TicketCreate, TicketUpdate]):
         return ticket
 
     async def get_stats(self, db: AsyncSession) -> dict:
-        from sqlalchemy import func, extract
-
         # Общая статистика
         total_result = await db.execute(select(func.count(Ticket.id)))
-        total = total_result.scalar()
+        total = total_result.scalar() or 0
 
         open_result = await db.execute(
             select(func.count(Ticket.id)).where(Ticket.status == TicketStatus.OPEN)
         )
-        open_count = open_result.scalar()
+        open_count = open_result.scalar() or 0
 
         # Статистика по приоритетам
         priorities_result = await db.execute(
             select(Ticket.priority, func.count(Ticket.id)).group_by(Ticket.priority)
         )
-        priorities = dict(priorities_result.all())
+        priorities = {priority: count for priority, count in priorities_result.all()}
 
-        # Среднее время ответа
+        # Среднее время ответа (в минутах)
         response_time_result = await db.execute(
-            select(func.avg(func.timestampdiff(func.MINUTE, Ticket.created_at, Ticket.first_response_at)))
-            .where(Ticket.first_response_at.isnot(None))
+            select(
+                func.avg(
+                    func.timestampdiff(
+                        func.MINUTE, Ticket.created_at, Ticket.first_response_at
+                    )
+                )
+            ).where(Ticket.first_response_at.isnot(None))
         )
         avg_response_time = response_time_result.scalar() or 0
 
@@ -105,7 +199,8 @@ class CRUDTicket(CRUDBase[Ticket, TicketCreate, TicketUpdate]):
             "total": total,
             "open": open_count,
             "priorities": priorities,
-            "avg_response_time_minutes": round(avg_response_time, 2)
+            "avg_response_time_minutes": round(float(avg_response_time), 2),
         }
+
 
 ticket = CRUDTicket(Ticket)

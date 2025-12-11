@@ -16,7 +16,8 @@ from app.core.config import settings
 pwd_context = CryptContext(
     schemes=["bcrypt"],
     deprecated="auto",
-    bcrypt__rounds=12  # Более безопасно, но медленнее
+    bcrypt__rounds=12,
+    bcrypt__ident="2b"     # <-- ВАЖНО: фиксирует стабильный backend
 )
 
 class SimpleJWT:

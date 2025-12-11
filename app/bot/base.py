@@ -3,6 +3,7 @@ from typing import Dict, Any, Optional
 from app.models.user import PlatformType
 from app.schemas.message import MessageCreate
 from app.schemas.attachment import AttachmentCreate
+from pydantic import BaseModel
 
 class BaseBot(ABC):
     def __init__(self, platform: PlatformType):

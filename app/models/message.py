@@ -14,14 +14,14 @@ class MessageStatus(enum.Enum):
     ERROR = "error"
 
 class AttachmentType(enum.Enum):
-    PHOTO = "photo"
-    VIDEO = "video"
-    AUDIO = "audio"
-    DOCUMENT = "document"
-    STICKER = "sticker"
-    VOICE = "voice"
-    LOCATION = "location"
-    CONTACT = "contact"
+    PHOTO = "PHOTO"
+    VIDEO = "VIDEO"
+    AUDIO = "AUDIO"
+    DOCUMENT = "DOCUMENT"
+    STICKER = "STICKER"
+    VOICE = "VOICE"
+    LOCATION = "LOCATION"
+    CONTACT = "CONTACT"
 
 class Message(BaseModel):
     __tablename__ = "messages"
@@ -35,7 +35,6 @@ class Message(BaseModel):
     confidence_score = Column(Float, nullable=True)
     platform_message_id = Column(String(100), nullable=True)
 
-    # Relationships
     user = relationship("User", back_populates="messages")
     ticket = relationship("Ticket", back_populates="messages")
     attachments = relationship("Attachment", back_populates="message", cascade="all, delete-orphan")
@@ -54,7 +53,6 @@ class Attachment(BaseModel):
     mime_type = Column(String(100), nullable=True)
     caption = Column(Text, nullable=True)
 
-    # Relationships
     message = relationship("Message", back_populates="attachments")
 
     def __repr__(self):

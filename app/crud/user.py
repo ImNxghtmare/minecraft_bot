@@ -46,4 +46,4 @@ class CRUDUser(CRUDBase[User, UserCreate, UserUpdate]):
             await db.refresh(user)
         return user
 
-user = CRUDUser(User)
+user_crud = CRUDUser(User)

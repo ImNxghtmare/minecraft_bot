@@ -30,22 +30,28 @@ class CRUDAgent(CRUDBase[Agent, AgentCreate, AgentCreate]):
         return agent
 
     async def create_initial_admin(self, db: AsyncSession, settings) -> Optional[Agent]:
-        # Проверяем, есть ли уже администратор
+        # Проверяем, есть ли администратор
         admin = await self.get_by_email(db, email=settings.first_admin_email)
         if admin:
             return admin
 
-        # Создаем администратора
+        # Создаём объект pydantic
         admin_in = AgentCreate(
             email=settings.first_admin_email,
             password=settings.first_admin_password,
             full_name=settings.first_admin_name,
-            role=AgentRole.ADMIN.value
+            role=AgentRole.ADMIN,  # <-- важное исправление
         )
-        admin_data = admin_in.dict()
-        admin_data["password_hash"] = Agent.hash_password(admin_data.pop("password"))
-        admin = Agent(**admin_data)
 
+        # Преобразуем в dict (Pydantic v2)
+        admin_data = admin_in.model_dump()
+
+        # Обрабатываем пароль
+        plain_password = admin_data.pop("password")
+        admin_data["password_hash"] = Agent.hash_password(plain_password)
+
+        # Создаём запись в БД
+        admin = Agent(**admin_data)
         db.add(admin)
         await db.commit()
         await db.refresh(admin)

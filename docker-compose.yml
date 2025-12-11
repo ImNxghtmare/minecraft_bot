@@ -1,5 +1,4 @@
-# docker-compose.yml - с альтернативным образом
-version: '3.8'
+version: "3.8"
 
 services:
   mysql:
@@ -7,48 +6,81 @@ services:
     container_name: minecraft_mysql
     restart: always
     environment:
-      MYSQL_ROOT_PASSWORD: Xakin1310228
-      MYSQL_DATABASE: minecraft_support
-      MYSQL_USER: root
-      MYSQL_PASSWORD: Xakin1310228
+      MYSQL_ROOT_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
     ports:
-      - "3307:3306"
+      - "${MYSQL_PORT_EXTERNAL:-3310}:3306"
     volumes:
       - mysql_data:/var/lib/mysql
+      - ./mysql-init:/docker-entrypoint-initdb.d:ro
     command: --default-authentication-plugin=mysql_native_password
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   redis:
     image: redis:7-alpine
     container_name: minecraft_redis
     restart: always
     ports:
-      - "6380:6379"
+      - "${REDIS_PORT_EXTERNAL:-6380}:6379"
     volumes:
       - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   phpmyadmin:
-    image: lscr.io/linuxserver/phpmyadmin:latest  # или lscr.io/linuxserver/phpmyadmin:latest
+    image: phpmyadmin/phpmyadmin:latest
     container_name: minecraft_phpmyadmin
     restart: always
     depends_on:
-      - mysql
+      mysql:
+        condition: service_healthy
     environment:
-      - DATABASE_HOST=mysql
-      - DATABASE_PORT_NUMBER=3306
-      - DATABASE_USER=root
-      - DATABASE_PASSWORD=Xakin1310228
-      - PHPMYADMIN_ALLOW_ARBITRARY_SERVER=yes
+      PMA_HOST: mysql
+      PMA_PORT: 3306
+      PMA_ARBITRARY: 1
     ports:
-      - "8080:8080"  # bitnami использует 8080, linuxserver - 80
+      - "8080:80"
 
   adminer:
     image: adminer:latest
     container_name: minecraft_adminer
     restart: always
     depends_on:
-      - mysql
+      mysql:
+        condition: service_healthy
     ports:
       - "8081:8080"
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: minecraft_api
+    restart: always
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./:/app:delegated
+    command: [
+      "uvicorn", "app.main:app",
+      "--host", "0.0.0.0",
+      "--port", "8000",
+      "--log-level", "info"
+    ]
 
 volumes:
   mysql_data:

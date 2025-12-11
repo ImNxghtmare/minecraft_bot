@@ -1,15 +1,20 @@
-from aiogram import Bot, Dispatcher, Router, F
-from aiogram.types import Message, Update, User as TgUser, PhotoSize, Document, Audio, Voice, Video, Sticker
+import logging
+from aiogram import Bot, Dispatcher, Router
+from aiogram.types import (
+    Message,
+    PhotoSize,
+    Document,
+    Audio,
+    Voice,
+    Video,
+    Sticker,
+)
 from aiogram.enums import ParseMode
 from aiogram.filters import Command
-from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
-from aiohttp import web
-import logging
-from typing import Dict, Any, Optional, List
-from datetime import datetime
 
-from app.bot.base import BaseBot
 from app.core.config import settings
+from app.bot.base import BaseBot
+from app.core.queue import message_queue
 from app.models.user import PlatformType
 from app.schemas.message import MessageCreate, MessageDirection
 from app.schemas.attachment import AttachmentCreate
@@ -17,204 +22,187 @@ from app.models.message import AttachmentType
 
 logger = logging.getLogger(__name__)
 
+
 class TelegramBot(BaseBot):
     def __init__(self):
         super().__init__(PlatformType.TELEGRAM)
-        self.bot = None
-        self.dp = None
+        self.bot: Bot | None = None
+        self.dp: Dispatcher | None = None
         self.router = Router()
         self._setup_handlers()
 
-    def _setup_handlers(self):
-        # Команды
-        self.router.message.register(self._handle_start, Command(commands=["start", "help"]))
-        self.router.message.register(self._handle_operator, Command(commands=["operator"]))
+    # ======================================================================
+    # Handlers
+    # ======================================================================
 
-        # Обработка сообщений
-        self.router.message.register(self._handle_message)
+    def _setup_handlers(self):
+        self.router.message.register(self.handle_start, Command("start"))
+        self.router.message.register(self.handle_operator, Command("operator"))
+        self.router.message.register(self.handle_all)
 
     async def start(self):
         if not settings.telegram_bot_token:
-            logger.warning("Telegram bot token not configured")
+            logger.warning("Telegram bot token not configured — bot disabled.")
             return
 
-        self.bot = Bot(token=settings.telegram_bot_token, parse_mode=ParseMode.HTML)
+        self.bot = Bot(settings.telegram_bot_token, parse_mode=ParseMode.HTML)
         self.dp = Dispatcher()
         self.dp.include_router(self.router)
 
-        # Проверяем вебхук или polling в зависимости от настроек
-        if settings.telegram_webhook_secret:
-            await self._setup_webhook()
-        else:
-            await self._start_polling()
-
-        logger.info("Telegram bot started")
-
-    async def _setup_webhook(self):
-        webhook_url = f"https://your-domain.com/webhook/telegram/{settings.telegram_webhook_secret}"
-        await self.bot.set_webhook(
-            url=webhook_url,
-            secret_token=settings.telegram_webhook_secret
-        )
-        logger.info(f"Webhook set to: {webhook_url}")
-
-    async def _start_polling(self):
+        logger.info("Telegram bot: starting POLLING mode...")
         await self.dp.start_polling(self.bot)
 
     async def stop(self):
         if self.bot:
             await self.bot.session.close()
 
-    async def send_message(self, user_id: str, text: str, **kwargs) -> Dict[str, Any]:
-        try:
-            message = await self.bot.send_message(
-                chat_id=user_id,
-                text=text,
-                **kwargs
-            )
-            return {
-                "message_id": str(message.message_id),
-                "success": True
-            }
-        except Exception as e:
-            logger.error(f"Error sending message: {e}")
-            return {
-                "success": False,
-                "error": str(e)
-            }
+    # ======================================================================
+    #         USER-FACING COMMANDS
+    # ======================================================================
 
-    async def _handle_start(self, message: Message):
-        welcome_text = (
-            "👋 Добро пожаловать в поддержку Minecraft сервера!\n\n"
-            "Я помогу вам с вопросами по:\n"
-            "• Техническим проблемам\n"
-            "• Игровым вопросам\n"
-            "• Оплате и донату\n"
-            "• Жалобам и предложениям\n\n"
-            "Просто напишите ваш вопрос, и я постараюсь помочь!\n"
-            "Если нужен оператор - используйте /operator"
+    async def handle_start(self, msg: Message):
+        await msg.answer(
+            "👋 Привет! Я бот поддержки Minecraft сервера.\n"
+            "Напиши свой вопрос — я создам тикет.\n"
+            "Если хочешь позвать оператора: /operator"
         )
-        await message.answer(welcome_text)
 
-    async def _handle_operator(self, message: Message):
-        await message.answer(
-            "👨‍💼 Ваш запрос передан оператору. "
-            "Скогда с вами свяжутся в этом чате."
-        )
-        # Здесь будет логика создания тикета
+    async def handle_operator(self, msg: Message):
+        await msg.answer("Оператор уведомлён. Опиши проблему подробнее 🙂")
 
-    async def _handle_message(self, message: Message):
-        # Эта функция будет вызывать основной процессор
-        logger.info(f"Received message from {message.from_user.id}: {message.text}")
+        await message_queue.put((
+            "telegram",
+            {
+                "message_id": msg.message_id,
+                "user_id": msg.from_user.id,
+                "text": msg.text,
+                "call_specialist": True,
+            }
+        ))
 
-        # Сохраняем сообщение в очередь для обработки
-        from app.core.queue import message_queue
-        await message_queue.put(("telegram", message.model_dump()))
+    # ======================================================================
+    #      CATCH-ALL: обычные сообщения
+    # ======================================================================
 
-    async def process_message(self, data: Dict[str, Any]) -> MessageCreate:
-        """Преобразует данные Telegram в MessageCreate"""
-        message = Message(**data)
+    async def handle_all(self, msg: Message):
+        logger.info(f"TG INCOMING: {msg.from_user.id} → {msg.text}")
+
+        await message_queue.put((
+            "telegram",
+            {
+                "message_id": msg.message_id,
+                "user_id": msg.from_user.id,
+                "text": msg.text,
+                "caption": msg.caption,
+
+                # attachments — передаём объекты aiogram
+                "photo": msg.photo,
+                "document": msg.document,
+                "audio": msg.audio,
+                "voice": msg.voice,
+                "video": msg.video,
+                "sticker": msg.sticker,
+            }
+        ))
+
+    # ======================================================================
+    #      Processor API (конвертация входящих сообщений)
+    # ======================================================================
+
+    async def process_message(self, data: dict) -> MessageCreate:
+        """Convert raw telegram data → internal MessageCreate"""
+        content = data.get("text") or data.get("caption")
 
         return MessageCreate(
-            user_id=0,  # Будет заполнено позже
+            user_id=0,  # Processor подставит
             ticket_id=None,
             direction=MessageDirection.INCOMING,
-            content=message.text or message.caption,
-            platform_message_id=str(message.message_id),
-            is_ai_response=False
+            content=content,
+            platform_message_id=str(data.get("message_id")),
+            is_ai_response=False,
         )
 
-    async def extract_attachments(self, data: Dict[str, Any]) -> List[AttachmentCreate]:
-        """Извлекает вложения из сообщения Telegram"""
-        message = Message(**data)
-        attachments = []
+    async def extract_attachments(self, data: dict):
+        """Convert aiogram attachments → AttachmentCreate"""
+        out = []
 
-        # Фото
-        if message.photo:
-            # Берем самую большую фотографию
-            largest_photo: PhotoSize = max(message.photo, key=lambda p: p.file_size or 0)
-            attachments.append(AttachmentCreate(
-                message_id=0,  # Будет заполнено позже
+        # PHOTO
+        if data.get("photo"):
+            largest: PhotoSize = max(data["photo"], key=lambda p: p.file_size or 0)
+            out.append(AttachmentCreate(
+                message_id=0,
                 attachment_type=AttachmentType.PHOTO,
-                file_id=largest_photo.file_id,
-                file_size=largest_photo.file_size,
-                caption=message.caption
+                file_id=largest.file_id,
+                file_size=largest.file_size,
+                caption=data.get("caption"),
             ))
 
-        # Документы
-        elif message.document:
-            doc: Document = message.document
-            attachments.append(AttachmentCreate(
+        # DOCUMENT
+        if data.get("document"):
+            d: Document = data["document"]
+            out.append(AttachmentCreate(
                 message_id=0,
                 attachment_type=AttachmentType.DOCUMENT,
-                file_id=doc.file_id,
-                file_url=doc.file_url,
-                file_size=doc.file_size,
-                mime_type=doc.mime_type,
-                caption=message.caption
+                file_id=d.file_id,
+                mime_type=d.mime_type,
+                file_size=d.file_size,
+                caption=data.get("caption"),
             ))
 
-        # Аудио
-        elif message.audio:
-            audio: Audio = message.audio
-            attachments.append(AttachmentCreate(
+        # AUDIO
+        if data.get("audio"):
+            a: Audio = data["audio"]
+            out.append(AttachmentCreate(
                 message_id=0,
                 attachment_type=AttachmentType.AUDIO,
-                file_id=audio.file_id,
-                file_size=audio.file_size,
-                mime_type=audio.mime_type,
-                caption=message.caption
+                file_id=a.file_id,
+                mime_type=a.mime_type,
+                file_size=a.file_size,
             ))
 
-        # Голосовые
-        elif message.voice:
-            voice: Voice = message.voice
-            attachments.append(AttachmentCreate(
+        # VOICE
+        if data.get("voice"):
+            v: Voice = data["voice"]
+            out.append(AttachmentCreate(
                 message_id=0,
                 attachment_type=AttachmentType.VOICE,
-                file_id=voice.file_id,
-                file_size=voice.file_size,
-                mime_type=voice.mime_type
+                file_id=v.file_id,
+                file_size=v.file_size,
+                mime_type=v.mime_type,
             ))
 
-        # Видео
-        elif message.video:
-            video: Video = message.video
-            attachments.append(AttachmentCreate(
+        # VIDEO
+        if data.get("video"):
+            v: Video = data["video"]
+            out.append(AttachmentCreate(
                 message_id=0,
                 attachment_type=AttachmentType.VIDEO,
-                file_id=video.file_id,
-                file_size=video.file_size,
-                mime_type=video.mime_type,
-                caption=message.caption
+                file_id=v.file_id,
+                file_size=v.file_size,
+                mime_type=v.mime_type,
+                caption=data.get("caption"),
             ))
 
-        # Стикеры
-        elif message.sticker:
-            sticker: Sticker = message.sticker
-            attachments.append(AttachmentCreate(
+        # STICKER
+        if data.get("sticker"):
+            s: Sticker = data["sticker"]
+            out.append(AttachmentCreate(
                 message_id=0,
                 attachment_type=AttachmentType.STICKER,
-                file_id=sticker.file_id,
-                file_size=sticker.file_size,
-                mime_type=sticker.mime_type
+                file_id=s.file_id,
             ))
 
-        return attachments
+        return out
 
-    def get_aiohttp_app(self):
-        """Создает aiohttp приложение для вебхука"""
-        if not settings.telegram_webhook_secret:
-            raise ValueError("Webhook secret not configured")
+    # ======================================================================
+    #                     OUTGOING MESSAGES
+    # ======================================================================
 
-        app = web.Application()
-
-        # Хендлер для вебхука
-        webhook_handler = SimpleRequestHandler(
-            dispatcher=self.dp,
-            bot=self.bot,
-            secret_token=settings.telegram_webhook_secret
-        )
-
-        webhook_handler.register(app, path=f"/webhook/telegram/{settings.telegram_webhook_secret}")
-        return app
+    async def send_message(self, user_id: str, text: str, **kwargs):
+        """Processor вызывает это, чтобы отправить сообщение клиенту"""
+        try:
+            result = await self.bot.send_message(user_id, text, **kwargs)
+            return {"success": True, "message_id": result.message_id}
+        except Exception as e:
+            logger.error(f"Telegram send_message error: {e}")
+            return {"success": False, "error": str(e)}
