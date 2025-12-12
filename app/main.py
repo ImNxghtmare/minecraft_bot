@@ -13,7 +13,7 @@ from app.core.processor import processor
 from app.core.queue import message_queue
 from app.api.v1.api import api_router
 
-from app.crud.agent import agent as agent_crud
+from app.crud.agent import agent_crud
 
 logger = logging.getLogger("minecraft_support")
 logging.basicConfig(level=logging.INFO)

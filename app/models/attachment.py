@@ -33,5 +33,5 @@ class Attachment(Base, TimestampMixin):
     mime_type: Mapped[str | None] = mapped_column(String(100))
     caption: Mapped[str | None] = mapped_column(Text)
 
-    # relation
+    # FIX — НЕ импортируем Message, указываем строкой
     message = relationship("Message", back_populates="attachments")

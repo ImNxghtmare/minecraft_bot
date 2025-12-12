@@ -1,15 +1,19 @@
+from datetime import datetime
+
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
 from passlib.context import CryptContext
 
 from app.models.agent import Agent, AgentRole
 from app.schemas.auth import AgentCreate, AgentLogin
-from app.core.config import settings
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 class AgentCRUD:
+    # ------------------------------------
+    # GETTERS
+    # ------------------------------------
 
     async def get_by_id(self, db: AsyncSession, agent_id: int) -> Agent | None:
         res = await db.execute(select(Agent).where(Agent.id == agent_id))
@@ -18,6 +22,10 @@ class AgentCRUD:
     async def get_by_email(self, db: AsyncSession, email: str) -> Agent | None:
         res = await db.execute(select(Agent).where(Agent.email == email))
         return res.scalars().first()
+
+    # ------------------------------------
+    # CREATE
+    # ------------------------------------
 
     async def create(self, db: AsyncSession, agent_in: AgentCreate) -> Agent:
         hashed_pw = pwd_context.hash(agent_in.password)
@@ -35,15 +43,39 @@ class AgentCRUD:
         await db.refresh(obj)
         return obj
 
+    # ------------------------------------
+    # AUTHENTICATE
+    # ------------------------------------
+
     async def authenticate(self, db: AsyncSession, data: AgentLogin) -> Agent | None:
         agent = await self.get_by_email(db, data.email)
         if not agent:
             return None
+
         if not pwd_context.verify(data.password, agent.password_hash):
             return None
+
         return agent
 
-    async def create_initial_admin(self, db: AsyncSession, settings):
+    # ------------------------------------
+    # LAST LOGIN
+    # ------------------------------------
+
+    async def update_last_login(self, db: AsyncSession, agent_id: int) -> None:
+        """Обновить поле last_login у агента."""
+        await db.execute(
+            update(Agent)
+            .where(Agent.id == agent_id)
+            .values(last_login=datetime.utcnow())
+        )
+        await db.commit()
+
+    # ------------------------------------
+    # INITIAL ADMIN
+    # ------------------------------------
+
+    async def create_initial_admin(self, db: AsyncSession, settings) -> None:
+        """Создаёт администратора при первом запуске, если его нет."""
         if not settings.first_admin_email:
             return
 

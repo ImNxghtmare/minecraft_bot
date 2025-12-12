@@ -1,43 +1,26 @@
-from pydantic import BaseModel
-from typing import Optional, List
+# app/schemas/ticket.py
 from datetime import datetime
-from enum import Enum
+from typing import Optional, List
 
+from pydantic import BaseModel
+
+from app.models.ticket import TicketStatus, TicketPriority, TicketCategory
+from app.models.user import PlatformType
 from app.schemas.message import MessageDB
-
-
-class TicketStatus(str, Enum):
-    OPEN = "OPEN"
-    IN_PROGRESS = "IN_PROGRESS"
-    PENDING = "PENDING"
-    CLOSED = "CLOSED"
-
-
-class TicketPriority(str, Enum):
-    LOW = "LOW"
-    MEDIUM = "MEDIUM"
-    HIGH = "HIGH"
-    CRITICAL = "CRITICAL"
-
-
-class TicketCategory(str, Enum):
-    TECHNICAL = "TECHNICAL"
-    GAMEPLAY = "GAMEPLAY"
-    PAYMENT = "PAYMENT"
-    COMPLAINT = "COMPLAINT"
-    OTHER = "OTHER"
 
 
 class TicketBase(BaseModel):
     title: str
     description: Optional[str] = None
+    priority: TicketPriority = TicketPriority.MEDIUM
+    category: TicketCategory = TicketCategory.OTHER
+    # флаг эскалации (например, если был /operator)
+    is_escalated: bool = False
 
 
 class TicketCreate(TicketBase):
     user_id: int
-    platform: str  # TELEGRAM / VK / WEB
-    priority: Optional[TicketPriority] = None
-    category: Optional[TicketCategory] = None
+    platform: PlatformType  # TELEGRAM / VK / WEB
 
 
 class TicketUpdate(BaseModel):
@@ -51,14 +34,11 @@ class TicketUpdate(BaseModel):
 class TicketDB(TicketBase):
     id: int
     user_id: int
-    platform: str
+    platform: PlatformType
     status: TicketStatus
-    priority: Optional[TicketPriority]
-    category: Optional[TicketCategory]
-    assigned_to: Optional[int]
-    first_response_at: Optional[datetime]
-    closed_at: Optional[datetime]
-    is_escalated: bool
+    assigned_to: Optional[int] = None
+    first_response_at: Optional[datetime] = None
+    closed_at: Optional[datetime] = None
 
     created_at: datetime
     updated_at: datetime

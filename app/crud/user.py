@@ -1,61 +1,120 @@
-from sqlalchemy.ext.asyncio import AsyncSession
+# app/crud/user.py
+from datetime import datetime
+from typing import Optional
+
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User, PlatformType
-from app.schemas.user import UserCreate, UserUpdate
+from app.schemas.user import UserCreate
 
 
 class UserCRUD:
+    async def get(self, db: AsyncSession, user_id: int) -> Optional[User]:
+        res = await db.execute(select(User).where(User.id == user_id))
+        return res.scalar_one_or_none()
 
-    async def get_by_platform(
+    async def get_by_platform_id(
             self,
             db: AsyncSession,
+            *,
             platform: PlatformType,
-            platform_id: str
-    ) -> User | None:
+            platform_id: str,
+    ) -> Optional[User]:
         res = await db.execute(
             select(User).where(
                 User.platform == platform,
-                User.platform_id == platform_id
-            )
+                User.platform_id == platform_id,
+                )
         )
-        return res.scalars().first()
+        return res.scalar_one_or_none()
 
-    async def create(
+    async def get_or_create(
             self,
             db: AsyncSession,
-            user_in: UserCreate
+            *,
+            platform: PlatformType,
+            platform_id: str,
+            username: str | None = None,
+            first_name: str | None = None,
+            last_name: str | None = None,
+            language_code: str | None = None,
     ) -> User:
+        """
+        Основной метод: ищем пользователя по platform + platform_id,
+        если нет — создаём.
+        """
+        user = await self.get_by_platform_id(
+            db, platform=platform, platform_id=platform_id
+        )
+        if user:
+            return user
 
         obj = User(
-            platform=user_in.platform,
-            platform_id=user_in.platform_id,
-            username=user_in.username,
-            first_name=user_in.first_name,
-            last_name=user_in.last_name,
-            language_code=user_in.language_code,
-            is_banned=False,
-            is_blocked=False
+            platform=platform,
+            platform_id=platform_id,
+            username=username,
+            first_name=first_name,
+            last_name=last_name,
+            language_code=language_code,
         )
-
         db.add(obj)
         await db.commit()
         await db.refresh(obj)
         return obj
 
-    async def update(
+    async def create_or_get(
             self,
             db: AsyncSession,
-            db_obj: User,
-            data: UserUpdate
+            *,
+            platform: PlatformType,
+            platform_id: str,
+            username: str | None = None,
+            first_name: str | None = None,
+            last_name: str | None = None,
+            language_code: str | None = None,
     ) -> User:
+        """
+        Алиас под старое название, которое вызывает processor.process().
+        По факту просто прокидывает в get_or_create.
+        """
+        return await self.get_or_create(
+            db=db,
+            platform=platform,
+            platform_id=platform_id,
+            username=username,
+            first_name=first_name,
+            last_name=last_name,
+            language_code=language_code,
+        )
 
-        for field, value in data.dict(exclude_unset=True).items():
-            setattr(db_obj, field, value)
-
+    async def update_last_active(self, db: AsyncSession, user_id: int) -> None:
+        res = await db.execute(select(User).where(User.id == user_id))
+        user = res.scalar_one_or_none()
+        if not user:
+            return
+        user.last_active = datetime.utcnow()
+        db.add(user)
         await db.commit()
-        await db.refresh(db_obj)
-        return db_obj
+
+    # Для совместимости со старым кодом, который вызывал get_or_create_from_platform
+    async def get_or_create_from_platform(
+            self,
+            db: AsyncSession,
+            *,
+            platform: str,
+            platform_user_id: str,
+            username: str | None = None,
+    ) -> User:
+        platform_enum = PlatformType[platform.upper()]
+        return await self.get_or_create(
+            db,
+            platform=platform_enum,
+            platform_id=platform_user_id,
+            username=username,
+        )
 
 
 user_crud = UserCRUD()
+# старое имя, если где-то используется from app.crud.user import user
+user = user_crud

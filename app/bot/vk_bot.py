@@ -11,7 +11,6 @@ from app.core.config import settings
 from app.models.user import PlatformType
 from app.schemas.message import MessageCreate, MessageDirection
 from app.schemas.attachment import AttachmentCreate
-from app.models.message import AttachmentType
 
 logger = logging.getLogger(__name__)
 

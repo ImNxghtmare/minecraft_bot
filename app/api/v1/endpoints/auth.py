@@ -1,5 +1,6 @@
 # app/api/v1/endpoints/auth.py
 from datetime import timedelta
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -7,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import jwt_manager, verify_password
-from app.crud.agent import agent as agent_crud
+from app.crud.agent import agent_crud
 from app.schemas.auth import Token, AgentResponse
 from app.api.deps import get_current_active_agent
 
@@ -17,7 +18,7 @@ router = APIRouter()
 @router.post("/login", response_model=Token)
 async def login(
         form_data: OAuth2PasswordRequestForm = Depends(),
-        db: AsyncSession = Depends(get_db)
+        db: AsyncSession = Depends(get_db),
 ):
     """
     🔐 Аутентификация агента через OAuth2PasswordRequestForm
@@ -30,13 +31,13 @@ async def login(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Неверный email или пароль",
-            headers={"WWW-Authenticate": "Bearer"}
+            headers={"WWW-Authenticate": "Bearer"},
         )
 
     if not agent.is_active:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Агент неактивен"
+            detail="Агент неактивен",
         )
 
     await agent_crud.update_last_login(db, agent_id=agent.id)
@@ -48,16 +49,16 @@ async def login(
             "sub": str(agent.id),
             "email": agent.email,
             "role": agent.role.value,
-            "name": agent.full_name
+            "name": agent.full_name,
         },
-        expires_delta=expires_delta
+        expires_delta=expires_delta,
     )
 
-    return {
-        "access_token": token,
-        "token_type": "bearer",
-        "expires_in": settings.access_token_expire_minutes * 60
-    }
+    return Token(
+        access_token=token,
+        token_type="bearer",
+        expires_in=settings.access_token_expire_minutes * 60,
+    )
 
 
 @router.get("/me", response_model=AgentResponse)
@@ -77,13 +78,13 @@ async def refresh_token(current_agent=Depends(get_current_active_agent)):
             "sub": str(current_agent.id),
             "email": current_agent.email,
             "role": current_agent.role.value,
-            "name": current_agent.full_name
+            "name": current_agent.full_name,
         },
-        expires_delta=expires_delta
+        expires_delta=expires_delta,
     )
 
-    return {
-        "access_token": token,
-        "token_type": "bearer",
-        "expires_in": settings.access_token_expire_minutes * 60
-    }
+    return Token(
+        access_token=token,
+        token_type="bearer",
+        expires_in=settings.access_token_expire_minutes * 60,
+    )

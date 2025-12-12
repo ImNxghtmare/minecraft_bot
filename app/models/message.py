@@ -17,32 +17,30 @@ class MessageStatus(PyEnum):
     ERROR = "ERROR"
 
 
-class AttachmentType(PyEnum):
-    PHOTO = "PHOTO"
-    VIDEO = "VIDEO"
-    AUDIO = "AUDIO"
-    DOCUMENT = "DOCUMENT"
-    STICKER = "STICKER"
-    VOICE = "VOICE"
-    LOCATION = "LOCATION"
-    CONTACT = "CONTACT"
-
-
 class Message(Base, TimestampMixin):
     __tablename__ = "messages"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
 
     ticket_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("tickets.id", ondelete="CASCADE")
+        Integer,
+        ForeignKey("tickets.id", ondelete="CASCADE")
     )
 
     user_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("users.id", ondelete="CASCADE")
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE")
     )
 
-    direction: Mapped[MessageDirection] = mapped_column(Enum(MessageDirection))
-    status: Mapped[MessageStatus | None] = mapped_column(Enum(MessageStatus))
+    direction: Mapped[MessageDirection] = mapped_column(
+        Enum(MessageDirection),
+        nullable=False
+    )
+
+    status: Mapped[MessageStatus | None] = mapped_column(
+        Enum(MessageStatus),
+        nullable=True
+    )
 
     content: Mapped[str | None] = mapped_column(Text)
 
@@ -55,4 +53,3 @@ class Message(Base, TimestampMixin):
     ticket = relationship("Ticket", back_populates="messages")
     user = relationship("User", back_populates="messages")
     attachments = relationship("Attachment", back_populates="message")
-

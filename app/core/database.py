@@ -1,64 +1,42 @@
 # app/core/database.py
+import logging
+from typing import AsyncGenerator
 
-from sqlalchemy.ext.asyncio import (
-    create_async_engine,
-    async_sessionmaker,
-    AsyncSession,
-)
-from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 
 from app.core.config import settings
+from app.models.base import Base
 
+logger = logging.getLogger(__name__)
 
-# ============================================================
-# Base ORM
-# ============================================================
-
-class Base(DeclarativeBase):
-    pass
-
-
-# ============================================================
-# ENGINE
-# ============================================================
-
-DATABASE_URL = settings.database_url
-
+# Асинхронный движок
 engine = create_async_engine(
-    DATABASE_URL,
-    echo=False,              # можешь включить True для дебага SQL
-    future=True
+    settings.database_url,
+    echo=settings.debug,
+    future=True,
+    pool_pre_ping=True,
 )
 
-
-# ============================================================
-# SESSION FACTORY
-# ============================================================
-
+# Фабрика сессий
 async_session_maker = async_sessionmaker(
-    engine,
-    expire_on_commit=False,
+    bind=engine,
     class_=AsyncSession,
+    expire_on_commit=False,
 )
 
 
-# ============================================================
-# DEPENDENCY
-# ============================================================
+async def init_models() -> None:
+    """Создание таблиц (вызывается в on_startup)."""
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    logger.info("✅ DB tables ensured.")
 
-async def get_session() -> AsyncSession:
+
+async def get_session() -> AsyncGenerator[AsyncSession, None]:
+    """Используй это как dependency в FastAPI (get_db)."""
     async with async_session_maker() as session:
         yield session
 
 
-# ============================================================
-# DATABASE INIT (CREATE TABLES)
-# ============================================================
-
-async def init_models():
-    """
-    Создаёт таблицы, если их нет. Вызывается при старте FastAPI.
-    """
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
+# Для старого кода, который импортирует get_db
+get_db = get_session
